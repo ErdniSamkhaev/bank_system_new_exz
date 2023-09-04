@@ -180,16 +180,45 @@ def make_transfer(sender_id, recipient_id, amount):
         conn.commit()
         close_db_connection(conn)  # Закрытие соединения
         return "Перевод успешно выполнен"
+    if sender_client_type == 'Юридическое лицо' and recipient_client_type == 'Юридическое лицо':
+        transfer_fee = amount * 0.2  # Налог 20% на сумму перевода
+        total_amount = amount + transfer_fee
 
+        # Проверяем наличие достаточных средств для перевода с учетом налога
+        if sender_balance >= total_amount:
+            new_sender_balance = sender_balance - total_amount
+            new_recipient_balance = recipient_balance + amount
+
+            # Обновляем балансы
+            cursor.execute('UPDATE accounts SET balance = ? WHERE id = ?', (new_sender_balance, sender_id))
+            cursor.execute('UPDATE accounts SET balance = ? WHERE id = ?', (new_recipient_balance, recipient_id))
+
+            # Зачисляем налог на счет банка
+            bank_account_id = 6
+            cursor.execute('SELECT balance FROM accounts WHERE id = ?', (bank_account_id,))
+            bank_balance = cursor.fetchone()[0]
+            new_bank_balance = bank_balance + transfer_fee
+            cursor.execute('UPDATE accounts SET balance = ? WHERE id = ?', (new_bank_balance, bank_account_id))
+
+            # Записываем транзакцию
+            cursor.execute(
+                'INSERT INTO transactions (sender_id, recipient_id, amount, transfer_fee) VALUES (?, ?, ?, ?)',
+                (sender_id, recipient_id, amount, transfer_fee))
+
+            conn.commit()
+            close_db_connection(conn)  # Закрытие соединения
+            return "Перевод успешно выполнен"
     elif sender_client_type == 'Физическое лицо' and recipient_client_type == 'Юридическое лицо':
         transfer_fee = amount * 0.2  # Налог 20% на сумму перевода
         total_amount = amount + transfer_fee
         if sender_balance >= total_amount:
             new_sender_balance = sender_balance - total_amount
             new_recipient_balance = recipient_balance + amount
+
             # Обновляем балансы
             cursor.execute('UPDATE accounts SET balance = ? WHERE id = ?', (new_sender_balance, sender_id))
             cursor.execute('UPDATE accounts SET balance = ? WHERE id = ?', (new_recipient_balance, recipient_id))
+
             # Записываем транзакцию
             cursor.execute(
                 'INSERT INTO transactions (sender_id, recipient_id, amount, transfer_fee) VALUES (?, ?, ?, ?)',
@@ -309,12 +338,8 @@ def main():
     while True:
         print("1. Регистрация физического лица.")
         print("2. Регистрация юридического лица.")
-        print("3. Создать счёт.")
-        print("4. Пополнить счет.")
-        print("5. Перевод между счетами.")
-        print("6. Вход в личный кабинет.")
-        print("7. Снять деньги со счета.")
-        print("8. Зачислить зарплату.")
+        print("3. Пополнить счет.")  # Пока просто для проверок функций
+        print("4. Вход в личный кабинет.")
         print("0. Выйти из программы.")
         choice = input("Выберите пункт: ")
 
@@ -324,51 +349,68 @@ def main():
             Client.Client.register_client('company')
         elif choice == '3':
             client_id = int(input("Введите ID клиента: "))
-            result = Client.Client.create_account_for_client(client_id)
-            print(result)
-        elif choice == '4':
-            client_id = int(input("Введите ID клиента: "))
             deposit_amount = float(input("Введите сумму для пополнения: "))
             result = deposit_money(client_id, deposit_amount)
             print(result)
-        elif choice == '5':
-            sender_id = int(input("Введите ID отправителя: "))
-            perform_transfer(sender_id)
-        elif choice == '6':
+        elif choice == '4':
             user_id = login()
             if user_id is not None:
                 user_id, user_type = user_id
                 print("Вход выполнен. ID клиента:", user_id)
                 if user_type == 'Физическое лицо':
-                    print("1. Просмотр баланса.")
-                    print("2. Перевод между своими счетами.")
-                    print("3. Выйти из личного кабинета.")
+                    print("1. Создать счёт.")
+                    print("2. Просмотр баланса.")
+                    print("3. Перевод между своими счетами.")
+                    print("4. Изменить данные.")
+                    print("5. Снять деньги со счета.")
+                    print("0. Выйти из личного кабинета.")
                     user_choice = input("Выберите пункт: ")
                     if user_choice == '1':
+                        result = Client.Client.create_account_for_client(user_id, user_type)
+                        print(result)
+                    elif user_choice == '2':
                         user_balance = view_balance(user_id)
                         print(f"Баланс вашего счета: {user_balance}")
-                    elif user_choice == '2':
-                        perform_transfer(user_id)
                     elif user_choice == '3':
+                        perform_transfer(user_id)
+                    elif user_choice == '4':
+                        new_name = input('Введите новое имя: ')
+                        new_phone = input("Введите новый номер телефона: ")
+                        new_email = input("Введите новый адрес эл.почты: ")
+                        new_password = input("Введите новый пароль: ")
+                        result = Client.Client.update_client_info_individual(user_id, new_name, new_phone, new_email,
+                                                                             new_password)
+                        print(result)
+                    elif user_choice == '5':
+                        account_id = int(input('Введите ID клиента:'))
+                        result = money_cash(account_id)
+                        print(result)
+                    elif user_choice == '0':
                         print("Выход из личного кабинета.")
                         break
                     else:
                         print("Некорректный выбор.")
                 elif user_type == 'Юридическое лицо':
                     while True:
-                        print("1. Просмотр баланса.")
-                        print("2. Выплатить ЗП сотрудникам.")
-                        print("3. Выйти из личного_кабинета.")
+                        print("1. Создать счёт.")
+                        print("2. Просмотр баланса.")
+                        print("3. Выплатить ЗП сотрудникам.")
+                        print("4. Изменить данные.")
+                        print("5. Переводы между счетами.")
+                        print("0. Выйти из личного_кабинета.")
                         user_choice = input("Выберите пункт : ")
-
                         if user_choice == '1':
+                            result = Client.Client.create_account_for_client(user_id, user_type)
+                            print(result)
+                        elif user_choice == '2':
                             company_balance = view_balance(user_id)
                             print(f"Баланс компании: {company_balance}")
-                        elif user_choice == '2':
-                            perform_transfer(user_id)
                         elif user_choice == '3':
-                            print("Выход из личного кабинета.")
-                            break
+                            sender = input('Введите ID отправителя: ')
+                            recipient = input('Введите ID получателя: ')
+                            salary = int('Введите сумму зарплаты: ')
+                            result = pay_salary(sender, recipient, salary)
+                            print(result)
                         elif user_choice == '4':
                             new_name = input('Введите новое имя: ')
                             new_director_name = input("Введите новое имя директора: ")
@@ -378,20 +420,15 @@ def main():
                             result = Client.Client.update_client_info_company(user_id, new_name, new_director_name,
                                                                               new_phone, new_email, new_password)
                             print(result)
+                        elif user_choice == '5':
+                            perform_transfer(user_id)
+                        elif user_choice == '0':
+                            print("Выход из личного кабинета.")
+                            break
                         else:
                             print("Некорректный выбор.")
             else:
                 print("Ошибка входа. Проверьте почту/телефон и пароль.")
-        elif choice == '7':
-            account_id = int(input('Введите ID клиента:'))
-            result = money_cash(account_id)
-            print(result)
-        elif choice == '8':
-            sender_id = int(input("Введите ID отправителя: "))
-            recipient_id = int(input("Введите ID получателя зарплаты: "))
-            salary_amount = float(input("Введите сумму зарплаты: "))
-            result = pay_salary(sender_id, recipient_id, salary_amount)
-            print(result)
         elif choice == '0':
             print("Программа завершена.")
             break

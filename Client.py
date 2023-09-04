@@ -3,8 +3,6 @@ import re
 from main_bank_system import connect_to_db, close_db_connection
 
 
-# commit
-
 def is_valid_name(name):
     return bool(re.match(r'^[А-Яа-я\s]*$', name))
 
@@ -43,7 +41,7 @@ class Client:
         return 'Данные успешно обновлены.'
 
     @staticmethod
-    def create_account_for_client(client_id):
+    def create_account_for_client(client_id, user_type):
         """Создание счета для указанного клиента"""
         conn, cursor = connect_to_db()  # Открытие соединения
 
@@ -63,14 +61,14 @@ class Client:
             close_db_connection(conn)  # Закрытие соединения
             return "Такого клиента нет."
 
-        if client_type[0] == 'Физическое лицо':
+        if user_type == 'Физическое лицо':
             account_type = 'Лицевой'
-        elif client_type[0] == 'Юридическое лицо':
+        elif user_type == 'Юридическое лицо':
             account_type = 'Расчетный'
         else:
             return "Некорректный тип клиента"
 
-        owner_name = client_type[1] if client_type[0] == 'Физическое лицо' else client_type[2]
+        owner_name = client_type[1] if user_type == 'Физическое лицо' else client_type[2]
 
         cursor.execute('''
             INSERT INTO accounts (client_id, owner_name, account_type, is_legal_entity, balance)
@@ -108,7 +106,7 @@ class Client:
             return hashed_password
 
     @staticmethod
-    def register_client(client_type):
+    def register_client(client_type, user_type=None):
         """Регистрация клиента"""
         full_name = ""
         company_name = ""
@@ -170,7 +168,7 @@ class Client:
             ''', ('Юридическое лицо', company_name, director_name, email, phone, hashed_password, True, 0.0, 0.0, 0.0))
 
         owner_id = cursor.lastrowid
-        Client.create_account_for_client(owner_id)
+        Client.create_account_for_client(owner_id, user_type)
 
         conn.commit()
         close_db_connection(conn)  # Закрытие соединения
