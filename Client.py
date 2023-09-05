@@ -1,48 +1,107 @@
 import hashlib
 import re
-from main_bank_system import connect_to_db, close_db_connection
+from database import connect_to_db, close_db_connection
 
 
 def is_valid_name(name):
+    """Функция для проверки переданной строки."""
     return bool(re.match(r'^[А-Яа-я\s]*$', name))
+
+
+def is_valid_phone():
+    """Функция для проверки формата телефона"""
+    while True:
+        phone = input("Введите телефон в формате '999 999 99 99' с пробелами: ")
+        if re.match(r'^\d{3} \d{3} \d{2} \d{2}$', phone):
+            return phone
+        else:
+            print("Некорректный формат телефона. Пожалуйста, введите еще раз.")
+
+
+def is_valid_email():
+    """Функция для проверки формата почты"""
+    while True:
+        email = input("Введите почту в формате 'info@rambler.ru': ")
+        if re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
+            return email
+        else:
+            print("Некорректный формат почты. Пожалуйста, введите еще раз.")
 
 
 class Client:
     @staticmethod
     def update_client_info_company(client_id, new_name, new_director_name, new_phone, new_email, new_password):
+        """
+        Обновляет информацию о юридическом лице в базе данных.
+
+        Параметры:
+        client_id (int): Идентификатор клиента, информацию о котором нужно обновить.
+        new_name (str): Новое полное имя юридического лица.
+        new_director_name (str): Новое имя директора юридического лица.
+        new_phone (str): Новый номер телефона клиента.
+        new_email (str): Новый адрес электронной почты клиента.
+        new_password (str): Новый пароль клиента (будет хеширован перед обновлением).
+
+        Возвращает:
+        str: Сообщение об успешном обновлении данных клиента.
+        """
         conn, cursor = connect_to_db()  # Открытие соединения
 
-        # Хэширование нового пароля
+        # Хеширование нового пароля
         hashed_password = hashlib.sha256(new_password.encode()).hexdigest()
 
-        # Обновление данных клиента
+        # Обновление данных клиента в таблицах clients и accounts
         cursor.execute('UPDATE clients SET full_name = ?, director_name = ?, phone = ?, email = ?, password = ? '
                        'WHERE id = ?', (new_name, new_director_name, new_phone, new_email, hashed_password, client_id))
-        cursor.execute('UPDATE accounts SET account_holder_name = ? WHERE client_id = ?',
+        cursor.execute('UPDATE accounts SET owner_name = ? WHERE client_id = ?',
                        (new_name, client_id))
-        conn.commit()
-        close_db_connection(conn)
+
+        conn.commit()  # Сохраняем
+        close_db_connection(conn)  # Закрытие соединения
         return 'Данные успешно обновлены.'
 
     @staticmethod
     def update_client_info_individual(client_id, new_name, new_phone, new_email, new_password):
+        """
+        Обновляет информацию о физическом лице в базе данных.
+
+        Args:
+            client_id (int): Идентификатор клиента, которого нужно обновить.
+            new_name (str): Новое имя клиента.
+            new_phone (str): Новый номер телефона клиента.
+            new_email (str): Новый адрес электронной почты клиента.
+            new_password (str): Новый пароль клиента (будет хэширован перед обновлением).
+        Returns:
+            str: Сообщение об успешном обновлении данных.
+
+        """
         conn, cursor = connect_to_db()  # Открытие соединения
 
-        # Хэширование нового пароля
+        # Хеширование нового пароля
         hashed_password = hashlib.sha256(new_password.encode()).hexdigest()
 
-        # Обновление данных клиента
+        # ООбновление данных клиента в таблицах clients и accounts
         cursor.execute('UPDATE clients SET full_name = ?, phone = ?, email = ?, password = ? '
                        'WHERE id = ?', (new_name, new_phone, new_email, hashed_password, client_id))
         cursor.execute('UPDATE accounts SET owner_name = ? WHERE client_id = ?',
                        (new_name, client_id))
-        conn.commit()
-        close_db_connection(conn)
+
+        conn.commit()  # Сохраняем
+        close_db_connection(conn)  # Закрытие соединения
         return 'Данные успешно обновлены.'
 
     @staticmethod
     def create_account_for_client(client_id, user_type):
-        """Создание счета для указанного клиента"""
+        """
+    Создает счет для указанного клиента.
+
+    Args:
+        client_id (int): Идентификатор клиента, для которого создается счет.
+        user_type (str): Тип клиента ('Физическое лицо' или 'Юридическое лицо').
+
+    Returns:
+        str: Сообщение об успешном создании счета или ошибка, если счет уже существует или указан некорректный тип клиента.
+    """
         conn, cursor = connect_to_db()  # Открытие соединения
 
         # Проверка наличия счета "Расчетный" для данного юридического лица
@@ -70,12 +129,13 @@ class Client:
 
         owner_name = client_type[1] if user_type == 'Физическое лицо' else client_type[2]
 
+        # Вставляем новую запись счета в таблицу
         cursor.execute('''
             INSERT INTO accounts (client_id, owner_name, account_type, is_legal_entity, balance)
             VALUES (?, ?, ?, ?, ?)
         ''', (client_id, owner_name, account_type, client_type[0] == 'Юридическое лицо', 0.0))
 
-        conn.commit()
+        conn.commit()  # Записываем
         close_db_connection(conn)  # Закрытие соединения
         return f"Счет успешно создан для владельца для владельца: {owner_name}"
 
@@ -107,7 +167,25 @@ class Client:
 
     @staticmethod
     def register_client(client_type, user_type=None):
-        """Регистрация клиента"""
+        """Регистрация клиента.
+
+        Функция позволяет зарегистрировать клиента, как физическое или юридическое лицо, собирая необходимую информацию,
+        такую как ФИО (для физического лица) или название компании и ФИО директора (для юридического лица), а также
+        электронную почту, телефон и пароль. При этом, функция выполняет следующие действия:
+
+        - Функция проверяет валидность ФИО и формат электронной почты.
+        - Пароль клиента хэшируется с использованием функции `get_password` из этого класса.
+        - Регистрация клиента в базе данных выполняется через SQL-запросы.
+        - После успешной регистрации создается аккаунт для клиента.
+
+        Функция `create_account_for_client` позволяет создать счет после регистрации.
+
+        Параметры:
+        client_type (str): Тип клиента, может быть 'individual' (физическое лицо) или 'company' (юридическое лицо).
+
+        Возвращает:
+        str: Сообщение об успешной регистрации клиента.
+        """
         full_name = ""
         company_name = ""
         director_name = ""
@@ -138,18 +216,9 @@ class Client:
                     break
 
         hashed_password = Client.get_password()
-        while True:
-            email = input("Введите почту в формате 'info@rambler.ru': ")
-            if re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
-                break
-            else:
-                return "Некорректный формат почты"
-        while True:
-            phone = input("Введите телефон в формате '999 999 99 99' с пробелами: ")
-            if re.match(r'^\d{3} \d{3} \d{2} \d{2}$', phone):
-                break
-            else:
-                return "Некорректный формат телефона"
+
+        email = is_valid_email()
+        phone = is_valid_phone()
 
         # Сохранение информации в базу данных
         conn, cursor = connect_to_db()  # Открытие соединения
@@ -167,10 +236,10 @@ class Client:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', ('Юридическое лицо', company_name, director_name, email, phone, hashed_password, True, 0.0, 0.0, 0.0))
 
-        owner_id = cursor.lastrowid
-        Client.create_account_for_client(owner_id, user_type)
+        owner_id = cursor.lastrowid  # Возвращаем ID последней записи
+        Client.create_account_for_client(owner_id, user_type)  # Создаем счет для определенного клиента
 
-        conn.commit()
+        conn.commit()  # Записываем в БД
         close_db_connection(conn)  # Закрытие соединения
 
         print("Регистрация успешно завершена!")

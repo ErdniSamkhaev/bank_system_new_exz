@@ -1,22 +1,7 @@
-import sqlite3
 import database
 import Client
 import hashlib
-
-# commit
-
-
-def connect_to_db():
-    """Функция открытия соединения с БД"""
-    conn = sqlite3.connect('bank.db')
-    cursor = conn.cursor()
-    return conn, cursor
-
-
-def close_db_connection(conn):
-    """Функция закрытия соединения с БД"""
-    conn.commit()
-    conn.close()
+from database import connect_to_db, close_db_connection
 
 
 def get_sender_recipient_info(account_id):
@@ -59,13 +44,14 @@ def deposit_money(client_id, amount):
 
     balance = account_dict['balance']  # Получение текущего баланса
     new_balance = balance + amount  # Вычисление нового баланса
+    owner_name = account_dict['owner_name']
 
     # Обновление баланса в БД
     cursor.execute('UPDATE accounts SET balance = ? WHERE id = ?', (new_balance, client_id))
     conn.commit()
     close_db_connection(conn)  # Закрытие соединения
 
-    return f"Счет успешно пополнен. Новый баланс: {new_balance}"
+    return f"Счет успешно пополнен для {owner_name}. Новый баланс: {new_balance}"
 
 
 def update_account_balance(cursor, account_id, new_balance):
@@ -112,6 +98,13 @@ def pay_salary(sender_id, recipient_id, salary_amount):
                 close_db_connection(conn)  # Закрытие соединения
                 return "Недостаточно средств для перевода с учетом комиссии"
 
+            # Зачисляем налог на счет банка
+            bank_account_id = 2
+            cursor.execute('SELECT balance FROM accounts WHERE id = ?', (bank_account_id,))
+            bank_balance = cursor.fetchone()[0]
+            new_bank_balance = bank_balance + transfer_fee
+            cursor.execute('UPDATE accounts SET balance = ? WHERE id = ?', (new_bank_balance, bank_account_id))
+
             # Обновляем балансы
             update_account_balance(cursor, sender_id, new_sender_balance)
             update_account_balance(cursor, recipient_id, new_recipient_balance)
@@ -129,13 +122,45 @@ def pay_salary(sender_id, recipient_id, salary_amount):
 
 
 def make_transfer(sender_id, recipient_id, amount):
-    """Функция для пополнения счета"""
+    """
+    Функция для осуществления денежных переводов между клиентами.
+
+    Parameters:
+        sender_id (int): Идентификатор отправителя.
+        recipient_id (int): Идентификатор получателя.
+        amount (float): Сумма перевода.
+
+    Returns:
+        str: Сообщение о результате операции.
+
+    Description:
+        Эта функция позволяет осуществлять переводы между клиентами. В зависимости от типов клиентов (физическое или
+        юридическое лицо) и суммы перевода, применяется комиссия или налог.
+
+        - Если отправитель и получатель являются физическими лицами, то для суммы перевода более 100 000 рублей
+          применяется комиссия 1% от суммы. Проверяется наличие достаточных средств для перевода с учетом комиссии.
+          Если средств недостаточно, операция отклоняется.
+
+        - Если отправитель и получатель являются юридическими лицами или если отправитель физическое лицо, а получатель
+          юридическое лицо, то применяется налог 20% на сумму перевода. Проверяется наличие достаточных средств для
+          перевода с учетом налога. Если средств недостаточно, операция отклоняется.
+
+        - Если отправитель юридическое лицо, а получатель физическое лицо, то операция отклоняется.
+
+        В случае успешного перевода, балансы отправителя и получателя обновляются, а также записывается соответствующая
+        транзакция. Комиссия или налог зачисляются на счет банка.
+
+        В случае ошибок (например, недостаточно средств или другие ошибки во время операции), функция вернет
+        соответствующее сообщение об ошибке.
+
+    """
     conn, cursor = connect_to_db()  # Открытие соединения
 
     # Получаем информацию об отправителе и получателе
     sender_id, sender_balance, sender_type = get_sender_recipient_info(sender_id)
     recipient_id, recipient_balance, recipient_type = get_sender_recipient_info(recipient_id)
 
+    # Проверка если нет ID в БД
     if sender_id is None or recipient_id is None:
         return "Клиент не найден"
 
@@ -147,9 +172,15 @@ def make_transfer(sender_id, recipient_id, amount):
 
     if sender_client_type == 'Юридическое лицо' and recipient_client_type == 'Физическое лицо':
         close_db_connection(conn)  # Закрытие соединения
-        return "Перевод запрещен"
+        return "Перевод запрещен. Нельзя переводить с расчетного счета физическим лицам."
 
     if sender_client_type == 'Физическое лицо' and recipient_client_type == 'Физическое лицо':
+
+        # Проверка чтобы нельзя было переводить самому себе на тот же счет.
+        if sender_id == recipient_id:
+            close_db_connection(conn)
+            return "Нельзя переводить самому себе."
+
         transfer_fee = 0
         if amount > 100000:
             transfer_fee = amount * 0.01
@@ -165,13 +196,14 @@ def make_transfer(sender_id, recipient_id, amount):
         # Обновляем балансы
         new_sender_balance = sender_balance - total_amount
         new_recipient_balance = recipient_balance + amount
+
         cursor.execute('UPDATE accounts SET balance = ? WHERE id = ?', (new_sender_balance, sender_id))
         cursor.execute('UPDATE accounts SET balance = ? WHERE id = ?', (new_recipient_balance, recipient_id))
         cursor.execute('INSERT INTO transactions (sender_id, recipient_id, amount, transfer_fee) VALUES (?, ?, ?, ?)',
                        (sender_id, recipient_id, amount, transfer_fee))
 
         # Зачисляем комиссию на счет банка
-        bank_account_id = 6
+        bank_account_id = 2
         cursor.execute('SELECT balance FROM accounts WHERE id = ?', (bank_account_id,))
         bank_balance = cursor.fetchone()[0]
         new_bank_balance = bank_balance + transfer_fee
@@ -180,7 +212,15 @@ def make_transfer(sender_id, recipient_id, amount):
         conn.commit()
         close_db_connection(conn)  # Закрытие соединения
         return "Перевод успешно выполнен"
-    if sender_client_type == 'Юридическое лицо' and recipient_client_type == 'Юридическое лицо':
+
+    if (sender_client_type == 'Юридическое лицо' and recipient_client_type == 'Юридическое лицо' or
+            sender_client_type == 'Физическое лицо' and recipient_client_type == 'Юридическое лицо'):
+
+        # Проверка чтобы нельзя было переводить самому себе.
+        if sender_id == recipient_id:
+            close_db_connection(conn)
+            return "Нельзя переводить самому себе."
+
         transfer_fee = amount * 0.2  # Налог 20% на сумму перевода
         total_amount = amount + transfer_fee
 
@@ -194,7 +234,7 @@ def make_transfer(sender_id, recipient_id, amount):
             cursor.execute('UPDATE accounts SET balance = ? WHERE id = ?', (new_recipient_balance, recipient_id))
 
             # Зачисляем налог на счет банка
-            bank_account_id = 6
+            bank_account_id = 2
             cursor.execute('SELECT balance FROM accounts WHERE id = ?', (bank_account_id,))
             bank_balance = cursor.fetchone()[0]
             new_bank_balance = bank_balance + transfer_fee
@@ -205,25 +245,7 @@ def make_transfer(sender_id, recipient_id, amount):
                 'INSERT INTO transactions (sender_id, recipient_id, amount, transfer_fee) VALUES (?, ?, ?, ?)',
                 (sender_id, recipient_id, amount, transfer_fee))
 
-            conn.commit()
-            close_db_connection(conn)  # Закрытие соединения
-            return "Перевод успешно выполнен"
-    elif sender_client_type == 'Физическое лицо' and recipient_client_type == 'Юридическое лицо':
-        transfer_fee = amount * 0.2  # Налог 20% на сумму перевода
-        total_amount = amount + transfer_fee
-        if sender_balance >= total_amount:
-            new_sender_balance = sender_balance - total_amount
-            new_recipient_balance = recipient_balance + amount
-
-            # Обновляем балансы
-            cursor.execute('UPDATE accounts SET balance = ? WHERE id = ?', (new_sender_balance, sender_id))
-            cursor.execute('UPDATE accounts SET balance = ? WHERE id = ?', (new_recipient_balance, recipient_id))
-
-            # Записываем транзакцию
-            cursor.execute(
-                'INSERT INTO transactions (sender_id, recipient_id, amount, transfer_fee) VALUES (?, ?, ?, ?)',
-                (sender_id, recipient_id, amount, transfer_fee))
-            conn.commit()
+            conn.commit()  # Записываем
             close_db_connection(conn)  # Закрытие соединения
             return "Перевод успешно выполнен"
         else:
@@ -235,6 +257,7 @@ def view_balance(account_id):
     """Просмотр баланса"""
     conn, cursor = connect_to_db()  # Открытие соединения
 
+    # Выводим информацию из БД
     cursor.execute('SELECT balance FROM accounts WHERE id = ?', (account_id,))
     balance = cursor.fetchone()[0]
 
@@ -291,7 +314,7 @@ def money_cash(account_id):
 
     if client_type == 'Физическое лицо' and amount_to_withdraw > 1000000:
         close_db_connection(conn)  # Закрытие соединения
-        return 'Физическим лицам запрещено снимать более 1 миллиона.'
+        return 'Физическим лицам запрещено снимать более 1 миллиона. Вам нужно явиться в банк.'
 
     if balance >= amount_to_withdraw:
         new_balance = balance - amount_to_withdraw
@@ -307,30 +330,36 @@ def money_cash(account_id):
 
 
 def login():
-    email_or_phone = input("Введите почту или телефон: ")
-    password = input("Введите пароль: ")
-    hashed_password = hashlib.sha256(password.encode()).hexdigest()
+    """Функция для входа в личный кабинет"""
+    while True:
+        email_or_phone = input("Введите почту или телефон: ")
 
-    conn, cursor = connect_to_db()  # Открытие соединения
+        conn, cursor = connect_to_db()  # Открытие соединения
 
-    cursor.execute('SELECT id, type, password FROM clients WHERE (email = ? OR phone = ?) AND password = ?',
-                   (email_or_phone, email_or_phone, hashed_password))
+        cursor.execute('SELECT id, type, full_name, password FROM clients WHERE (email = ? OR phone = ?)'
+                       , (email_or_phone, email_or_phone))
 
-    user_data = cursor.fetchone()
+        user_data = cursor.fetchone()  # Записываем
 
-    if user_data is None:
-        close_db_connection(conn)  # Закрытие соединения
-        return None  # Пользователь не найден
+        if user_data is None:
+            close_db_connection(conn)  # Закрытие соединения
+            print('Пользователь с такой почтой или телефоном не найден.')
+            continue  # Пользователь не найден, продолжаем цикл.
 
-    user_id, user_type, stored_password = user_data
+        user_id, user_type, user_full_name, stored_password = user_data
 
-    # Проверка введенного пароля
-    if hashed_password != stored_password:
+        # Теперь кода почта или телефон найдены, запрашиваем пароль.
+        password = input("Введите пароль: ")
+        hashed_password = hashlib.sha256(password.encode()).hexdigest()
+
+        # Проверка введенного пароля
+        if hashed_password != stored_password:
+            close_db_connection(conn)
+            print("Не правильный пароль. Попробуйте снова.")
+            continue  # Не правильный пароль, продолжаем цикл
+
         close_db_connection(conn)
-        return "Не правильный пароль."
-
-    close_db_connection(conn)
-    return user_id, user_type
+        return user_id, user_type, user_full_name
 
 
 def main():
@@ -355,12 +384,12 @@ def main():
         elif choice == '4':
             user_id = login()
             if user_id is not None:
-                user_id, user_type = user_id
-                print("Вход выполнен. ID клиента:", user_id)
+                user_id, user_type, user_full_name = user_id
+                print("Вход выполнен. Здравствуйте, дорогой: ", user_full_name)
                 if user_type == 'Физическое лицо':
                     print("1. Создать счёт.")
                     print("2. Просмотр баланса.")
-                    print("3. Перевод между своими счетами.")
+                    print("3. Перевод между счетами.")
                     print("4. Изменить данные.")
                     print("5. Снять деньги со счета.")
                     print("0. Выйти из личного кабинета.")
@@ -373,6 +402,7 @@ def main():
                         print(f"Баланс вашего счета: {user_balance}")
                     elif user_choice == '3':
                         perform_transfer(user_id)
+                        continue
                     elif user_choice == '4':
                         new_name = input('Введите новое имя: ')
                         new_phone = input("Введите новый номер телефона: ")
@@ -408,11 +438,11 @@ def main():
                         elif user_choice == '3':
                             sender = input('Введите ID отправителя: ')
                             recipient = input('Введите ID получателя: ')
-                            salary = int('Введите сумму зарплаты: ')
+                            salary = int(input('Введите сумму зарплаты: '))
                             result = pay_salary(sender, recipient, salary)
                             print(result)
                         elif user_choice == '4':
-                            new_name = input('Введите новое имя: ')
+                            new_name = input('Введите новое название компании: ')
                             new_director_name = input("Введите новое имя директора: ")
                             new_phone = input("Введите новый номер телефона: ")
                             new_email = input("Введите новый адрес эл.почты: ")
