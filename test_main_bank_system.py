@@ -1,26 +1,25 @@
 import unittest
-from unittest.mock import patch
-from main_bank_system import get_sender_recipient_info
-from database import connect_to_db, close_db_connection
+from unittest.mock import patch, MagicMock
+from main_bank_system import money_cash
 
 
-class TestGetSenderRecipientInfo(unittest.TestCase):
-    @patch('database.connect_to_db')
-    def test_get_sender_recipient_info(self, mock_connect_db):
-        # Мокируем connect_to_db
-        mock_conn, mock_cursor = mock_connect_db.return_value
-        mock_cursor.fetchone.return_value = (1, 'Sender Name', 'Sender Type')
+class TestMoneyCash(unittest.TestCase):
+    @patch('main_bank_system.connect_to_db')
+    def test_successful_money_cash(self, mock_connect):
+        # Создаем мок-объекты для connect_to_db
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value = (mock_conn, mock_cursor)
 
-        # Вызываем функцию get_sender_recipient_info
-        sender_id, sender_balance, sender_type = get_sender_recipient_info(1)
+        # Устанавливаем ожидаемые значения из базы данных
+        account_info = (1, 1, 'Сберегательный', 1, 1, 1000.0)  # Пример данных счета
+        mock_cursor.fetchone.return_value = account_info
 
-        # Проверяем, что функция правильно вызывает connect_to_db
-        mock_connect_db.assert_called_once()
+        # Вызываем функцию
+        result = money_cash(1)
 
-        # Проверяем, что функция возвращает ожидаемые значения
-        self.assertEqual(sender_id, 1)
-        self.assertEqual(sender_balance, 'Sender Name')
-        self.assertEqual(sender_type, 'Sender Type')
+        # Проверяем, что функция вернула ожидаемый результат
+        self.assertEqual(result, "Сумма 100.0 успешно снята. Новый баланс: 900.0")
 
 
 if __name__ == '__main__':

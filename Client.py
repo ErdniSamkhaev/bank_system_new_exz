@@ -5,7 +5,7 @@ from database import connect_to_db, close_db_connection
 
 def is_valid_name(name):
     """Функция для проверки переданной строки."""
-    return bool(re.match(r'^[А-Яа-я\s]*$', name))
+    return bool(re.match(r'^[А-Яа-я\s\-]*$', name))
 
 
 def is_valid_phone():
